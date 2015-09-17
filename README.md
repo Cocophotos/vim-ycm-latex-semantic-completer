@@ -20,6 +20,27 @@ How do I use it?
 project. When this is done, it is able to walk through every subdirectory to index
 labels and bib ids.
 
+## BibTeXParser
+
+To enhance the popup completion with part of the title and authors, we use the bibtexparser
+module from this [repository](https://github.com/sciunto-org/python-bibtexparser).
+
+This allows YCM to display a popup like this :
+
+```
+turing:1935     On Computable Numbers... (Turing Alan)
+knuth:1984      Literate Programming (Knuth Donald E.)
+```
+
+You can install the bibtexparser via easy_install or pip
+
+```bash
+sudo pip install bibtexparser
+```
+
+If the bibtexparser is not present on the system, the completer will fallback into
+the bibid only mode displaying only bibids in the completion popup.
+
 Are there limitations?
 ----------------------
 

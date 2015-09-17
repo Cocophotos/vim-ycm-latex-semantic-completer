@@ -10,6 +10,46 @@ from ycmd.completers.completer import Completer
 from ycmd import responses
 from ycmd import utils
 
+
+# To handle BibTeX properly
+nobibparser = False
+try:
+    import bibtexparser
+    from bibtexparser.bparser import BibTexParser
+    from bibtexparser.customization import convert_to_unicode, author
+except ImportError:
+    nobibparser = True
+
+def smart_truncate(content, length=30, suffix='...'):
+    if len(content) <= length:
+        return content
+    else:
+        return ' '.join(content[:length+1-len(suffix)].split(' ')[0:-1]) + suffix
+
+def bib_customizations(record):
+    def truncate_title(record):
+        title = record['title'] if 'title' in record else ''
+        title = smart_truncate(title)
+        record['title'] = title
+        return record
+
+    def et_al(record):
+        author = record['author'] if 'author' in record else []
+        author = [a.replace(', ', ' ').replace(',', ' ') for a in author]
+        if len(author) == 0:
+            record['author'] = ''
+        elif len(author) == 1:
+            record['author'] = author[0]
+        else:
+            record['author'] = author[0] + ' et al.'
+        return record
+
+    record = convert_to_unicode(record)
+    record = author(record)
+    record = et_al(record)
+    record = truncate_title(record)
+    return record
+
 LOG = logging.getLogger(__name__)
 
 class LatexCompleter( Completer ):
@@ -89,18 +129,8 @@ class LatexCompleter( Completer ):
         else:
             print >> sys.stderr, "Main directory successfully found at %s" % self._main_directory
 
-    def _FindBibEntries(self):
+    def _FindBibEntriesRegex(self):
         """
-        Find BIBtex entries.
-
-        I'm currently assuming, that Bib entries have the format
-        ^@<articletype> {<ID>,
-            <bibtex properties>
-            [..]
-        }
-
-        Hence, to find IDs for completion, I scan for lines starting
-        with an @ character and extract the ID from there.
         """
         ret = []
         for filename in self._Walk(self._main_directory, ".bib"):
@@ -113,6 +143,42 @@ class LatexCompleter( Completer ):
                             re.sub(r"@(.*){([^,]*).*", r"\2", line))
                         )
         return ret
+
+    def _FindBibEntriesParser(self):
+        """
+        """
+        ret = []
+        parser = BibTexParser()
+        parser.customization = bib_customizations
+        for filename in self._Walk(self._main_directory, ".bib"):
+            with open(filename) as bibtex_file:
+                bib_database = bibtexparser.load(bibtex_file, parser=parser)
+                for entry in bib_database.entries:
+                    if 'ID' not in entry:
+                        continue
+                    title = entry['title']
+                    author = entry['author']
+                    ret.append(responses.BuildCompletionData(
+                        entry['ID'],
+                        "%s (%s)" % (title, author)
+                    ))
+        return ret
+
+    def _FindBibEntries(self):
+        """
+        Find BIBtex entries.
+
+        Using a proper BibTeXParser to be able to retrieve field from the bib
+        entry and add it as a help into YCM popup.
+
+        If the BibTexParser module is not available, fallbacks to smart regexes
+        to only acquire bibid
+        """
+        if nobibparser:
+            return self._FindBibEntriesRegex()
+        else:
+            return self._FindBibEntriesParser()
+
 
     def _FindLabels(self):
         """
