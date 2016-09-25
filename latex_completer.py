@@ -68,7 +68,7 @@ class LatexCompleter( Completer ):
     def ShouldUseNowInner( self, request_data ):
         #q    = utils.ToUtf8IfNeeded(request_data['query'])
         #col  = request_data["start_column"]
-        line = utils.ToUtf8IfNeeded(request_data["line_value"])
+        line = utils.ToUnicode(request_data["line_value"])
 
         if self._main_directory is None:
             self._ComputeMainDirectory(request_data)
