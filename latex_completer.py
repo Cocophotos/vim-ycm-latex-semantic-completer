@@ -197,6 +197,26 @@ class LatexCompleter( Completer ):
                         re.sub(r".*\label{(.*)}.*", r"\1", line))
                         )
         return ret
+    
+    def _GoToDefinition(self, request_data):
+        raise RuntimeError( 'Can\'t jump to definition or declaration: not implemented yet' )
+
+    def GetSubcommandsMap( self ):
+        return {
+        'GoToDefinition'           : ( lambda self, request_data, args:
+            self._GoToDefinition( request_data ) ),
+        'GoToDeclaration'          : ( lambda self, request_data, args:
+            self._GoToDefinition( request_data ) ),
+        'GoTo'                     : ( lambda self, request_data, args:
+            self._GoToDefinition( request_data ) ),
+        }
+
+    def GetDetailedDiagnostic( self, request_data ):
+        return responses.BuildDisplayMessageResponse(
+      self.DebugInfo(request_data))
+
+    def DebugInfo( self, request_data ):
+        return "Looking for *.bib in %s" % self._main_directory
 
     def ComputeCandidatesInner( self, request_data ):
         """
