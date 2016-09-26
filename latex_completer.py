@@ -64,6 +64,9 @@ class LatexCompleter( Completer ):
         self._main_directory    = None
         self._cite_reg          = re.compile("cite.*\{")
         self._ref_reg           = re.compile("ref\{|pageref\{")
+        self._files             = {}
+        self._cached_data       = {}
+        self._d_cache_hits      = 0
 
     def ShouldUseNowInner( self, request_data ):
         #q    = utils.ToUtf8IfNeeded(request_data['query'])
@@ -129,19 +132,41 @@ class LatexCompleter( Completer ):
         else:
             print >> sys.stderr, "Main directory successfully found at %s" % self._main_directory
 
+    def _CacheDataAndSkip(self, filename):
+        last_modification = os.path.getmtime(filename)
+
+        if filename not in self._files:
+            self._files[filename] = last_modification
+            return False, []
+        if last_modification <= self._files[filename]:
+            self._d_cache_hits += 1
+            return True, self._cached_data[filename]
+
+        self._files[filename] = last_modification
+        return False, []
+
     def _FindBibEntriesRegex(self):
         """
         """
         ret = []
         for filename in self._Walk(self._main_directory, ".bib"):
+            skip, cache = self._CacheDataAndSkip(filename)
+            if skip:
+                ret.extend(cache)
+                continue
+
+            resp = []
             for line in codecs.open(filename, 'r', 'utf-8'):
                 line = line.rstrip()
                 found = re.search(r"@(.*){([^,]*).*", line)
                 if found is not None:
                     if found.group(1) != "string":
-                        ret.append(responses.BuildCompletionData(
+                        resp.append(responses.BuildCompletionData(
                             re.sub(r"@(.*){([^,]*).*", r"\2", line))
                         )
+
+            ret.extend(resp)
+            self._cached_data[filename] = resp
         return ret
 
     def _FindBibEntriesParser(self):
@@ -151,6 +176,12 @@ class LatexCompleter( Completer ):
         parser = BibTexParser()
         parser.customization = bib_customizations
         for filename in self._Walk(self._main_directory, ".bib"):
+            skip, cache = self._CacheDataAndSkip(filename)
+            if skip:
+                ret.extend(cache)
+                continue
+
+            resp = []
             with open(filename) as bibtex_file:
                 bib_database = bibtexparser.load(bibtex_file, parser=parser)
                 for entry in bib_database.entries:
@@ -158,10 +189,13 @@ class LatexCompleter( Completer ):
                         continue
                     title = entry['title']
                     author = entry['author']
-                    ret.append(responses.BuildCompletionData(
+                    resp.append(responses.BuildCompletionData(
                         entry['ID'],
                         "%s (%s)" % (title, author)
                     ))
+
+            ret.extend(resp)
+            self._cached_data[filename] = resp
         return ret
 
     def _FindBibEntries(self):
@@ -190,14 +224,23 @@ class LatexCompleter( Completer ):
         """
         ret = []
         for filename in self._Walk(self._main_directory, ".tex"):
+            skip, cache = self._CacheDataAndSkip(filename)
+            if skip:
+                ret.extend(cache)
+                continue
+
+            resp = []
             for line in codecs.open(filename, 'r', 'utf-8'):
                 line = line.rstrip()
                 if re.search(r".*\label{(.*)}.*", line) is not None:
-                    ret.append(responses.BuildCompletionData(
+                    resp.append(responses.BuildCompletionData(
                         re.sub(r".*\label{(.*)}.*", r"\1", line))
                         )
+
+            self._cached_data[filename] = resp
+            ret.extend(resp)
         return ret
-    
+
     def _GoToDefinition(self, request_data):
         raise RuntimeError( 'Can\'t jump to definition or declaration: not implemented yet' )
 
@@ -216,7 +259,10 @@ class LatexCompleter( Completer ):
       self.DebugInfo(request_data))
 
     def DebugInfo( self, request_data ):
-        return "Looking for *.bib in %s" % self._main_directory
+        bib_dir = "Looking for *.bib in %s" % self._main_directory
+        cache   = "Number of cached files: %i" % len(self._files)
+        hits    = "Number of cache hits: %i" % self._d_cache_hits
+        return "%s\n%s\n%s" % (bib_dir, cache, hits)
 
     def ComputeCandidatesInner( self, request_data ):
         """
