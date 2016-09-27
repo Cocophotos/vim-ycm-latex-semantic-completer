@@ -67,6 +67,7 @@ class LatexCompleter( Completer ):
         self._files             = {}
         self._cached_data       = {}
         self._d_cache_hits      = 0
+        self._goto_labels       = {}
 
     def ShouldUseNowInner( self, request_data ):
         #q    = utils.ToUtf8IfNeeded(request_data['query'])
@@ -230,19 +231,39 @@ class LatexCompleter( Completer ):
                 continue
 
             resp = []
-            for line in codecs.open(filename, 'r', 'utf-8'):
+            for i, line in enumerate(codecs.open(filename, 'r', 'utf-8')):
                 line = line.rstrip()
-                if re.search(r".*\label{(.*)}.*", line) is not None:
-                    resp.append(responses.BuildCompletionData(
-                        re.sub(r".*\label{(.*)}.*", r"\1", line))
-                        )
+                match = re.search(r".*\label{(.*)}.*", line)
+                if match is not None:
+                    lid = re.sub(r".*\label{(.*)}.*", r"\1", line)
+                    self._goto_labels[lid] = (filename, i+1, match.start(1))
+                    resp.append( responses.BuildCompletionData(lid) )
 
             self._cached_data[filename] = resp
             ret.extend(resp)
         return ret
 
     def _GoToDefinition(self, request_data):
-        raise RuntimeError( 'Can\'t jump to definition or declaration: not implemented yet' )
+        def find_end_of_command(line, match):
+            if match is None:
+                return -1
+            for i in range(match.start(), len(line)):
+                e = line[i]
+                if e == "}":
+                    return i
+            return -1
+
+        line = utils.ToUnicode(request_data["line_value"])
+        match = self._ref_reg.search(line)
+        end_of_command = find_end_of_command(line, match)
+        if end_of_command == -1:
+            raise RuntimeError( 'Can\'t jump to definition or declaration: not implemented yet' )
+        else:
+            ref = line[match.end():end_of_command]
+            if ref not in self._goto_labels:
+                raise RuntimeError( 'Can\'t jump to definition or declaration: not implemented yet' )
+            filename, line, col = self._goto_labels[ref]
+            return responses.BuildGoToResponse( filename, line, col )
 
     def GetSubcommandsMap( self ):
         return {
