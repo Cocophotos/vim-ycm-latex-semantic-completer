@@ -62,8 +62,8 @@ class LatexCompleter( Completer ):
         super( LatexCompleter, self ).__init__( user_options )
         self._completion_target = 'none'
         self._main_directory    = None
-        self._cite_reg          = re.compile("cite.*\{")
-        self._ref_reg           = re.compile("ref\{|pageref\{")
+        self._cite_reg          = re.compile("\\\\[a-zA-Z]*cite[a-zA-Z]*\*?\{[^\s\}]*$")
+        self._ref_reg           = re.compile("\\\\[a-zA-Z]*ref\{[^\s\}]*$")
         self._files             = {}
         self._cached_data       = {}
         self._d_cache_hits      = 0
