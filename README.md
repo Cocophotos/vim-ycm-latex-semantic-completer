@@ -20,6 +20,13 @@ How do I use it?
 project. When this is done, it is able to walk through every subdirectory to index
 labels and bib ids.
 
+* You need to add a semantic completion part in your .vimrc:
+```bash
+    let g:ycm_semantic_triggers = {
+        \ 'tex'  : ['{']
+    \}
+```
+
 ## BibTeXParser
 
 To enhance the popup completion with part of the title and authors, we use the bibtexparser
