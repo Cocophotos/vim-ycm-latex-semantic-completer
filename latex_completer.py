@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-
+from __future__ import print_function
 import re
 import logging
 import sys
@@ -129,9 +129,9 @@ class LatexCompleter( Completer ):
 
         if not FindMain(path, ".bib"):
             self._main_directory = filepath
-            print >> sys.stderr, "Unable to set the main directory..."
+            print("Unable to set the main directory...", sys.stderr)
         else:
-            print >> sys.stderr, "Main directory successfully found at %s" % self._main_directory
+            print("Main directory successfully found at {}".format(self._main_directory), sys.stderr)
 
     def _CacheDataAndSkip(self, filename):
         last_modification = os.path.getmtime(filename)
@@ -302,6 +302,6 @@ class LatexCompleter( Completer ):
         elif self._completion_target == 'all':
             candidates = self._FindLabels() + self._FindBibEntries()
 
-        print >> sys.stderr, request_data['query']
+        print(request_data['query'], sys.stderr)
 
         return candidates
