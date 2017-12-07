@@ -127,7 +127,10 @@ class LatexCompleter( Completer ):
         filepath = request_data['filepath']
         path     = os.path.dirname(filepath)
 
-        if not FindMain(path, ".bib"):
+        #old version which looks for the .bib. probably should
+        #enable it for bibtex completion
+        #if not FindMain(path, ".bib"):
+        if not FindMain(path, ".latexmain"):
             self._main_directory = filepath
             print("Unable to set the main directory...", sys.stderr)
         else:
@@ -233,9 +236,9 @@ class LatexCompleter( Completer ):
             resp = []
             for i, line in enumerate(codecs.open(filename, 'r', 'utf-8')):
                 line = line.rstrip()
-                match = re.search(r".*\label{(.*)}.*", line)
+                match = re.search(r".*\\\w*label{(.*)}.*", line)
                 if match is not None:
-                    lid = re.sub(r".*\label{(.*)}.*", r"\1", line)
+                    lid = re.sub(r".*\\\w*label{(.*)}.*", r"\1", line)
                     self._goto_labels[lid] = (filename, i+1, match.start(1))
                     resp.append( responses.BuildCompletionData(lid) )
 
