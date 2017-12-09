@@ -233,9 +233,9 @@ class LatexCompleter( Completer ):
             resp = []
             for i, line in enumerate(codecs.open(filename, 'r', 'utf-8')):
                 line = line.rstrip()
-                match = re.search(r".*\label{(.*)}.*", line)
+                match = re.search(r".*\\label{(.*)}.*", line)
                 if match is not None:
-                    lid = re.sub(r".*\label{(.*)}.*", r"\1", line)
+                    lid = re.sub(r".*\\label{(.*)}.*", r"\1", line)
                     self._goto_labels[lid] = (filename, i+1, match.start(1))
                     resp.append( responses.BuildCompletionData(lid) )
 
