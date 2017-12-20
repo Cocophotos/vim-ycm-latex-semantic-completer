@@ -10,6 +10,11 @@ from ycmd.completers.completer import Completer
 from ycmd import responses
 from ycmd import utils
 
+"""
+TODO- change approach, and use seperate objects for each
+completer engine. Right now, they share a cache, which is silly,
+to say the least.
+"""
 
 # To handle BibTeX properly
 nobibparser = False
@@ -64,6 +69,7 @@ class LatexCompleter( Completer ):
         self._main_directory    = None
         self._cite_reg          = re.compile("\\\\[a-zA-Z]*cite[a-zA-Z]*\*?\{[^\s\}]*\}?")
         self._ref_reg           = re.compile("\\\\[a-zA-Z]*ref\{[^\s\}]*\}?")
+        self._env_reg           = re.compile("\\\\(begin)|(end)\{[^\s\}]*")
         self._files             = {}
         self._cached_data       = {}
         self._d_cache_hits      = 0
@@ -91,6 +97,13 @@ class LatexCompleter( Completer ):
             else:
                 self._completion_target = 'label'
             should_use = True
+
+        match = self._env_reg.search(line_splitted)
+        if match is not None:
+            self._completion_target = 'environment'
+            should_use = True
+
+       
 
         return should_use
 
@@ -218,6 +231,35 @@ class LatexCompleter( Completer ):
             return self._FindBibEntriesParser()
 
 
+    def _FindEnvironments(self):
+        """
+        Find LaTeX environments for \begin{} completion.
+
+        This time we scan through all .tex files in the current
+        directory and extract the content of all \begin{} commands
+        as sources for completion.
+        """
+        ret = []
+        for filename in self._Walk(self._main_directory, ".tex"):
+            skip, cache = self._CacheDataAndSkip(filename)
+            if skip:
+                ret.extend(cache)
+                continue
+
+            resp = []
+            for i, line in enumerate(codecs.open(filename, 'r', 'utf-8')):
+                line = line.rstrip()
+                match = re.search(r".*\\begin{(.*?)}.*", line)
+                if match is not None:
+                    lid = re.sub(r".*\\begin{(.*?)}.*", r"\1", line)
+                    temp = responses.BuildCompletionData(lid)
+                    if not temp in ret and not temp in resp:
+                      resp.append( temp )
+
+            self._cached_data[filename] = resp
+            ret.extend(resp)
+        return ret
+
     def _FindLabels(self):
         """
         Find LaTeX labels for \ref{} completion.
@@ -236,9 +278,9 @@ class LatexCompleter( Completer ):
             resp = []
             for i, line in enumerate(codecs.open(filename, 'r', 'utf-8')):
                 line = line.rstrip()
-                match = re.search(r".*\\\w*label{(.*)}.*", line)
+                match = re.search(r".*\\\w*(?<!contents)label{(.*?)}.*", line)
                 if match is not None:
-                    lid = re.sub(r".*\\\w*label{(.*)}.*", r"\1", line)
+                    lid = re.sub(r".*\\\w*label{(.*?)}.*", r"\1", line)
                     self._goto_labels[lid] = (filename, i+1, match.start(1))
                     resp.append( responses.BuildCompletionData(lid) )
 
@@ -302,6 +344,8 @@ class LatexCompleter( Completer ):
             candidates = self._FindBibEntries()
         elif self._completion_target == 'label':
             candidates = self._FindLabels()
+        elif self._completion_target == 'environment':
+            candidates = self._FindEnvironments()
         elif self._completion_target == 'all':
             candidates = self._FindLabels() + self._FindBibEntries()
 
