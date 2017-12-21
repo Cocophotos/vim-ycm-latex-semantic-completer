@@ -69,7 +69,7 @@ class LatexCompleter( Completer ):
         self._main_directory    = None
         self._cite_reg          = re.compile("\\\\[a-zA-Z]*cite[a-zA-Z]*\*?\{[^\s\}]*\}?")
         self._ref_reg           = re.compile("\\\\[a-zA-Z]*ref\{[^\s\}]*\}?")
-        self._env_reg           = re.compile("\\\\(begin)|(end)\{[^\s\}]*")
+        self._env_reg           = re.compile(r"\\(begin)|(end)\{")
         self._files             = {}
         self._cached_data       = {}
         self._d_cache_hits      = 0
@@ -77,7 +77,7 @@ class LatexCompleter( Completer ):
 
     def ShouldUseNowInner( self, request_data ):
         #q    = utils.ToUtf8IfNeeded(request_data['query'])
-        #col  = request_data["start_column"]
+        #col  = request_data["column_codepoint"] - 1
         line = utils.ToUnicode(request_data["line_value"])
 
         if self._main_directory is None:
@@ -351,4 +351,4 @@ class LatexCompleter( Completer ):
 
         print(request_data['query'], sys.stderr)
 
-        return candidates
+        return self.FilterAndSortCandidates( candidates, request_data[ 'query' ])
