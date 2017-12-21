@@ -68,8 +68,9 @@ class LatexCompleter( Completer ):
         self._completion_target = 'none'
         self._main_directory    = None
         self._cite_reg          = re.compile("\\\\[a-zA-Z]*cite[a-zA-Z]*\*?\{[^\s\}]*\}?")
-        self._ref_reg           = re.compile("\\\\[a-zA-Z]*ref\{[^\s\}]*\}?")
+        self._ref_reg           = re.compile(r"\\[a-zA-Z]*ref\{")
         self._env_reg           = re.compile(r"\\(begin)|(end)\{")
+        self.closebrace         = re.compile(r"\{?[a-zA-z:_]*\}?")
         self._files             = {}
         self._cached_data       = {}
         self._d_cache_hits      = 0
@@ -77,31 +78,34 @@ class LatexCompleter( Completer ):
 
     def ShouldUseNowInner( self, request_data ):
         #q    = utils.ToUtf8IfNeeded(request_data['query'])
-        #col  = request_data["column_codepoint"] - 1
-        line = utils.ToUnicode(request_data["line_value"])
+        col  = request_data["column_codepoint"] - 1
+        line = request_data["line_value"]
 
         if self._main_directory is None:
             self._ComputeMainDirectory(request_data)
 
         should_use = False
-        line_splitted = line
-        match = self._cite_reg.search(line_splitted)
-        if match is not None:
-            self._completion_target = 'cite'
-            should_use = True
+        line_splitted = line[ : col]
+        line_left     = line[ col : ]
+        
+        if self.closebrace.match(line_left) is not None:
+            match = self._cite_reg.search(line_splitted)
+            if match is not None:
+                self._completion_target = 'cite'
+                should_use = True
 
-        match = self._ref_reg.search(line_splitted)
-        if match is not None:
-            if self._completion_target == 'cite':
-                self._completion_target = 'all'
-            else:
-                self._completion_target = 'label'
-            should_use = True
+            match = self._ref_reg.search(line_splitted)
+            if match is not None:
+                if self._completion_target == 'cite':
+                    self._completion_target = 'all'
+                else:
+                    self._completion_target = 'label'
+                should_use = True
 
-        match = self._env_reg.search(line_splitted)
-        if match is not None:
-            self._completion_target = 'environment'
-            should_use = True
+            match = self._env_reg.search(line_splitted)
+            if match is not None:
+                self._completion_target = 'environment'
+                should_use = True
 
        
 
@@ -351,4 +355,4 @@ class LatexCompleter( Completer ):
 
         print(request_data['query'], sys.stderr)
 
-        return self.FilterAndSortCandidates( candidates, request_data[ 'query' ])
+        return self.FilterAndSortCandidates( candidates, request_data[ 'query' ] )
