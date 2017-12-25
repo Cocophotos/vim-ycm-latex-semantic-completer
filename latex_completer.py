@@ -67,47 +67,60 @@ class LatexCompleter( Completer ):
         super( LatexCompleter, self ).__init__( user_options )
         self._completion_target = 'none'
         self._main_directory    = None
-        self._cite_reg          = re.compile("\\\\[a-zA-Z]*cite[a-zA-Z]*\*?\{[^\s\}]*\}?")
-        self._ref_reg           = re.compile(r"\\[a-zA-Z]*ref\{")
-        self._env_reg           = re.compile(r"\\(begin)|(end)\{")
-        self.closebrace         = re.compile(r"\{?[a-zA-z:_]*\}?")
+        self._cite_reg          = re.compile(r"\\[a-zA-Z]*cite[a-zA-Z]*\*?$")
+        self._ref_reg           = re.compile(r"\\[a-zA-Z]*ref$")
+        self._env_reg           = re.compile(r"\\(begin|end)$")
         self._files             = {}
         self._cached_data       = {}
         self._d_cache_hits      = 0
         self._goto_labels       = {}
+        self.logfile            = open("/home/veesh/latexlog", "w")
+        
 
     def ShouldUseNowInner( self, request_data ):
-        #q    = utils.ToUtf8IfNeeded(request_data['query'])
-        col  = request_data["column_codepoint"] - 1
-        line = request_data["line_value"]
+
+        cursor      = request_data["column_codepoint"]  - 1
+        match_start = request_data["start_codepoint"] - 1
+        line        = request_data["line_value"]
 
         if self._main_directory is None:
             self._ComputeMainDirectory(request_data)
 
         should_use = False
-        line_splitted = line[ : col]
-        line_left     = line[ col : ]
+        line_splitted = line[ : match_start ]
+        line_left     = line[ match_start : cursor ]
+
+        if  line[match_start] == '\\':
+            return should_use
+
+        """
+        self.logfile.write("line split: " + line_splitted + "\n")
+        self.logfile.write("line  left: " + line_left + "\n")
+        self.logfile.write("full  line: " + line + "\n")
+        self.logfile.write("\n")
+        """
         
-        if self.closebrace.match(line_left) is not None:
-            match = self._cite_reg.search(line_splitted)
-            if match is not None:
-                self._completion_target = 'cite'
-                should_use = True
 
-            match = self._ref_reg.search(line_splitted)
-            if match is not None:
-                if self._completion_target == 'cite':
-                    self._completion_target = 'all'
-                else:
-                    self._completion_target = 'label'
-                should_use = True
+        match = self._cite_reg.search(line_splitted)
+        if match is not None:
+            self._completion_target = 'cite'
+            should_use = True
 
-            match = self._env_reg.search(line_splitted)
-            if match is not None:
-                self._completion_target = 'environment'
-                should_use = True
+        match = self._ref_reg.search(line_splitted)
+        #TODO- consider that hyperref takes the label in  a [ ] pair
+        if match is not None :
+            if self._completion_target == 'cite':
+                self._completion_target = 'all'
+            else:
+                self._completion_target = 'label'
+            should_use = True
 
-       
+        match = self._env_reg.search(line_splitted)
+        if match is not None:
+            self._completion_target = 'environment'
+            should_use = True
+
+
 
         return should_use
 
@@ -235,6 +248,10 @@ class LatexCompleter( Completer ):
             return self._FindBibEntriesParser()
 
 
+    def BuildOurCompletes(self, name, our_type):
+        return responses.BuildCompletionData("{" + name + "}",
+                our_type, None, name)
+        
     def _FindEnvironments(self):
         """
         Find LaTeX environments for \begin{} completion.
@@ -256,7 +273,7 @@ class LatexCompleter( Completer ):
                 match = re.search(r".*\\begin{(.*?)}.*", line)
                 if match is not None:
                     lid = re.sub(r".*\\begin{(.*?)}.*", r"\1", line)
-                    temp = responses.BuildCompletionData(lid)
+                    temp = self.BuildOurCompletes(lid, "Environment")
                     if not temp in ret and not temp in resp:
                       resp.append( temp )
 
@@ -355,4 +372,4 @@ class LatexCompleter( Completer ):
 
         print(request_data['query'], sys.stderr)
 
-        return self.FilterAndSortCandidates( candidates, request_data[ 'query' ] )
+        return candidates
