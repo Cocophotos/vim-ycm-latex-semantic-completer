@@ -57,6 +57,16 @@ def bib_customizations(record):
 
 LOG = logging.getLogger(__name__)
 
+class LatexSlave (object):
+    def __init__(self, ):
+        self._completion_target = 'none'
+        self._main_directory    = None
+        self._files             = {}
+        self._cached_data       = {}
+        self._d_cache_hits      = 0
+        self._goto_labels       = {}
+
+
 class LatexCompleter( Completer ):
     """
     Completer for LaTeX that takes into account BibTex entries
@@ -65,15 +75,9 @@ class LatexCompleter( Completer ):
 
     def __init__( self, user_options ):
         super( LatexCompleter, self ).__init__( user_options )
-        self._completion_target = 'none'
-        self._main_directory    = None
         self._cite_reg          = re.compile(r"\\[a-zA-Z]*cite[a-zA-Z]*\*?$")
         self._ref_reg           = re.compile(r"\\[a-zA-Z]*ref$")
         self._env_reg           = re.compile(r"\\(begin|end)$")
-        self._files             = {}
-        self._cached_data       = {}
-        self._d_cache_hits      = 0
-        self._goto_labels       = {}
         self.logfile            = open("/home/veesh/latexlog", "w")
         
 
