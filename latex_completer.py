@@ -57,15 +57,201 @@ def bib_customizations(record):
 
 LOG = logging.getLogger(__name__)
 
-class LatexSlave (object):
-    def __init__(self, ):
+class GenericSlave (object):
+    """
+    A generic slave for completing. Contains its own conception of
+    the main directory, and its own responses cache
+    """
+    def __init__(self, output):
         self._completion_target = 'none'
         self._main_directory    = None
+        self.completion_wanted  = False
         self._files             = {}
         self._cached_data       = {}
         self._d_cache_hits      = 0
         self._goto_labels       = {}
+        self.extensions         = ''
+        self.output_regex = re.compile(output + "$", re.UNICODE)
 
+    def ShouldUse(self, target):
+        if self.output_regex.search(target) is not None:
+            self.completion_wanted = True
+        else:
+            self.completion_wanted = False
+        return self.completion_wanted
+
+
+    def _Walk( self, path, what ):
+        for root, dirs, files in os.walk(path):
+            for file in files:
+                if file.endswith(what):
+                    yield os.path.join(root, file)
+
+    def _ComputeMainDirectory( self,  request_data ):
+        def FindMain(path, what):
+            found = False
+            for file in os.listdir(path):
+                if file.endswith(what):
+                    self._main_directory = path
+                    found = True
+                    break
+
+            if not found:
+                new_path = os.path.dirname(os.path.normpath(path))
+                if new_path == path or new_path == "":
+                    return False
+                else:
+                    return FindMain(new_path, what)
+            return True
+
+        filepath = request_data['filepath']
+        path     = os.path.dirname(filepath)
+
+        if not FindMain(path, self.extensions):
+            self._main_directory = filepath
+            print("Unable to set the main directory...", sys.stderr)
+        else:
+            print("Main directory successfully found at {}".format(self._main_directory), 
+                    sys.stderr)
+
+    def _CacheDataAndSkip(self, filename):
+        last_modification = os.path.getmtime(filename)
+
+        if filename not in self._files:
+            self._files[filename] = last_modification
+            return False, []
+        if last_modification <= self._files[filename]:
+            self._d_cache_hits += 1
+            return True, self._cached_data[filename]
+
+        self._files[filename] = last_modification
+        return False, []
+
+    def ProduceTargets(self):
+        if self.completion_wanted:
+            return self._FindTarget()
+    def _FindTarget(self):
+        pass
+
+class LatexSlave (GenericSlave):
+    def __init__(self, collect, output, target):
+        super( LatexSlave , self).__init__(output)
+        self.collect_regex = re.compile(collect, re.UNICODE)
+        self.extensions = ".latexmain"
+        self._completion_target = target
+
+    def BuildOurCompletes(self, name, our_type):
+        """
+        Surround the respons value with brackets.
+        TODO- perhaps add a square bracket option
+        """
+        return responses.BuildCompletionData("{" + name + "}",
+                our_type, None, name)
+
+
+    def _FindTarget(self):
+        """
+        Find LaTeX labels for various completions
+
+        This time we scan through all .tex files in the current
+        directory and extract the content of all relevant commands
+        as sources for completion.
+        """
+        ret = []
+        for filename in self._Walk(self._main_directory, ".tex"):
+            skip, cache = self._CacheDataAndSkip(filename)
+            if skip:
+                ret.extend(cache)
+                continue
+
+            resp = []
+            for i, line in enumerate(codecs.open(filename, 'r', 'utf-8')):
+                line = line.rstrip()
+                match = re.search(r".*"+ self.collect_regex + ".*", line)
+                if match is not None:
+                    lid = re.sub(r".*" + self.collect_regex + ".*", r"\1", line)
+                    temp = self.BuildOurCompletes(lid,
+                            self._completion_target)
+                    if not temp in ret and not temp in resp:
+                      resp.append( temp )
+                    self._goto_labels[lid] = (filename, i+1, match.start(1))
+
+            self._cached_data[filename] = resp
+            ret.extend(resp)
+        return ret
+
+class BibTexSlave (GenericSlave):
+    def __init__(self)
+        super( BibTexSlave , self).__init__(r"\\[a-zA-Z]*cite[a-zA-Z]*\*?")
+        self.extensions = ".bib"
+
+    def _FindBibEntriesRegex(self):
+        """
+        """
+        ret = []
+        for filename in self._Walk(self._main_directory, ".bib"):
+            skip, cache = self._CacheDataAndSkip(filename)
+            if skip:
+                ret.extend(cache)
+                continue
+
+            resp = []
+            for line in codecs.open(filename, 'r', 'utf-8'):
+                line = line.rstrip()
+                found = re.search(r"@(.*){([^,]*).*", line)
+                if found is not None:
+                    if found.group(1) != "string":
+                        resp.append(responses.BuildCompletionData(
+                            re.sub(r"@(.*){([^,]*).*", r"\2", line))
+                        )
+
+            ret.extend(resp)
+            self._cached_data[filename] = resp
+        return ret
+
+    def _FindBibEntriesParser(self):
+        """
+        """
+        ret = []
+        parser = BibTexParser()
+        parser.customization = bib_customizations
+        for filename in self._Walk(self._main_directory, ".bib"):
+            skip, cache = self._CacheDataAndSkip(filename)
+            if skip:
+                ret.extend(cache)
+                continue
+
+            resp = []
+            with open(filename) as bibtex_file:
+                bib_database = bibtexparser.load(bibtex_file, parser=parser)
+                for entry in bib_database.entries:
+                    if 'ID' not in entry:
+                        continue
+                    title = entry['title']
+                    author = entry['author']
+                    resp.append(responses.BuildCompletionData(
+                        entry['ID'],
+                        "%s (%s)" % (title, author)
+                    ))
+
+            ret.extend(resp)
+            self._cached_data[filename] = resp
+        return ret
+
+    def _FindTarget(self):
+        """
+        Find BIBtex entries.
+
+        Using a proper BibTeXParser to be able to retrieve field from the bib
+        entry and add it as a help into YCM popup.
+
+        If the BibTexParser module is not available, fallbacks to smart regexes
+        to only acquire bibid
+        """
+        if nobibparser:
+            return self._FindBibEntriesRegex()
+        else:
+            return self._FindBibEntriesParser()
 
 class LatexCompleter( Completer ):
     """
@@ -75,7 +261,6 @@ class LatexCompleter( Completer ):
 
     def __init__( self, user_options ):
         super( LatexCompleter, self ).__init__( user_options )
-        self._cite_reg          = re.compile(r"\\[a-zA-Z]*cite[a-zA-Z]*\*?$")
         self._ref_reg           = re.compile(r"\\[a-zA-Z]*ref$")
         self._env_reg           = re.compile(r"\\(begin|end)$")
         self.logfile            = open("/home/veesh/latexlog", "w")
@@ -135,126 +320,9 @@ class LatexCompleter( Completer ):
         """
         return ['plaintex', 'tex']
 
-    def _Walk( self, path, what ):
-        for root, dirs, files in os.walk(path):
-            for file in files:
-                if file.endswith(what):
-                    yield os.path.join(root, file)
-
-    def _ComputeMainDirectory( self, request_data ):
-        def FindMain(path, what):
-            found = False
-            for file in os.listdir(path):
-                if file.endswith(what):
-                    self._main_directory = path
-                    found = True
-                    break
-
-            if not found:
-                new_path = os.path.dirname(os.path.normpath(path))
-                if new_path == path or new_path == "":
-                    return False
-                else:
-                    return FindMain(new_path, what)
-            return True
-
-        filepath = request_data['filepath']
-        path     = os.path.dirname(filepath)
-
-        #old version which looks for the .bib. probably should
-        #enable it for bibtex completion
-        #if not FindMain(path, ".bib"):
-        if not FindMain(path, ".latexmain"):
-            self._main_directory = filepath
-            print("Unable to set the main directory...", sys.stderr)
-        else:
-            print("Main directory successfully found at {}".format(self._main_directory), sys.stderr)
-
-    def _CacheDataAndSkip(self, filename):
-        last_modification = os.path.getmtime(filename)
-
-        if filename not in self._files:
-            self._files[filename] = last_modification
-            return False, []
-        if last_modification <= self._files[filename]:
-            self._d_cache_hits += 1
-            return True, self._cached_data[filename]
-
-        self._files[filename] = last_modification
-        return False, []
-
-    def _FindBibEntriesRegex(self):
-        """
-        """
-        ret = []
-        for filename in self._Walk(self._main_directory, ".bib"):
-            skip, cache = self._CacheDataAndSkip(filename)
-            if skip:
-                ret.extend(cache)
-                continue
-
-            resp = []
-            for line in codecs.open(filename, 'r', 'utf-8'):
-                line = line.rstrip()
-                found = re.search(r"@(.*){([^,]*).*", line)
-                if found is not None:
-                    if found.group(1) != "string":
-                        resp.append(responses.BuildCompletionData(
-                            re.sub(r"@(.*){([^,]*).*", r"\2", line))
-                        )
-
-            ret.extend(resp)
-            self._cached_data[filename] = resp
-        return ret
-
-    def _FindBibEntriesParser(self):
-        """
-        """
-        ret = []
-        parser = BibTexParser()
-        parser.customization = bib_customizations
-        for filename in self._Walk(self._main_directory, ".bib"):
-            skip, cache = self._CacheDataAndSkip(filename)
-            if skip:
-                ret.extend(cache)
-                continue
-
-            resp = []
-            with open(filename) as bibtex_file:
-                bib_database = bibtexparser.load(bibtex_file, parser=parser)
-                for entry in bib_database.entries:
-                    if 'ID' not in entry:
-                        continue
-                    title = entry['title']
-                    author = entry['author']
-                    resp.append(responses.BuildCompletionData(
-                        entry['ID'],
-                        "%s (%s)" % (title, author)
-                    ))
-
-            ret.extend(resp)
-            self._cached_data[filename] = resp
-        return ret
-
-    def _FindBibEntries(self):
-        """
-        Find BIBtex entries.
-
-        Using a proper BibTeXParser to be able to retrieve field from the bib
-        entry and add it as a help into YCM popup.
-
-        If the BibTexParser module is not available, fallbacks to smart regexes
-        to only acquire bibid
-        """
-        if nobibparser:
-            return self._FindBibEntriesRegex()
-        else:
-            return self._FindBibEntriesParser()
 
 
-    def BuildOurCompletes(self, name, our_type):
-        return responses.BuildCompletionData("{" + name + "}",
-                our_type, None, name)
+
         
     def _FindEnvironments(self):
         """
@@ -285,33 +353,6 @@ class LatexCompleter( Completer ):
             ret.extend(resp)
         return ret
 
-    def _FindLabels(self):
-        """
-        Find LaTeX labels for \ref{} completion.
-
-        This time we scan through all .tex files in the current
-        directory and extract the content of all \label{} commands
-        as sources for completion.
-        """
-        ret = []
-        for filename in self._Walk(self._main_directory, ".tex"):
-            skip, cache = self._CacheDataAndSkip(filename)
-            if skip:
-                ret.extend(cache)
-                continue
-
-            resp = []
-            for i, line in enumerate(codecs.open(filename, 'r', 'utf-8')):
-                line = line.rstrip()
-                match = re.search(r".*\\\w*(?<!contents)label{(.*?)}.*", line)
-                if match is not None:
-                    lid = re.sub(r".*\\\w*label{(.*?)}.*", r"\1", line)
-                    self._goto_labels[lid] = (filename, i+1, match.start(1))
-                    resp.append( responses.BuildCompletionData(lid) )
-
-            self._cached_data[filename] = resp
-            ret.extend(resp)
-        return ret
 
     def _GoToDefinition(self, request_data):
         def find_end_of_command(line, match):
