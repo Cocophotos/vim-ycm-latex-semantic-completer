@@ -71,7 +71,7 @@ class GenericSlave (object):
         self._d_cache_hits      = 0
         self._goto_labels       = {}
         self.extensions         = ''
-        self.output_regex = re.compile(output + "$", re.UNICODE)
+        self.output_regex       = re.compile(output + "$", re.UNICODE)
 
     def ShouldUse(self, target):
         if self.output_regex.search(target) is not None:
@@ -130,23 +130,24 @@ class GenericSlave (object):
     def ProduceTargets(self):
         if self.completion_wanted:
             return self._FindTarget()
+
     def _FindTarget(self):
         pass
 
 class LatexSlave (GenericSlave):
-    def __init__(self, collect, output, target):
-        super( LatexSlave , self).__init__(output)
-        self.collect_regex = re.compile(collect, re.UNICODE)
+    def __init__(self, arguments):
+        super( LatexSlave , self).__init__(arguments['output'])
+        self.collect_regex = re.compile(arguments['collect'], re.UNICODE)
         self.extensions = ".latexmain"
-        self._completion_target = target
+        self._completion_target = arguments['target']
 
-    def BuildOurCompletes(self, name, our_type):
+    def BuildOurCompletes(self, name):
         """
-        Surround the respons value with brackets.
+        Surround the response value with brackets.
         TODO- perhaps add a square bracket option
         """
         return responses.BuildCompletionData("{" + name + "}",
-                our_type, None, name)
+                self._completion_target, None, name)
 
 
     def _FindTarget(self):
@@ -170,18 +171,26 @@ class LatexSlave (GenericSlave):
                 match = re.search(r".*"+ self.collect_regex + ".*", line)
                 if match is not None:
                     lid = re.sub(r".*" + self.collect_regex + ".*", r"\1", line)
-                    temp = self.BuildOurCompletes(lid,
-                            self._completion_target)
-                    if not temp in ret and not temp in resp:
-                      resp.append( temp )
+                    temp = self.BuildOurCompletes(lid)
+                    if not lid in ret and not lid in resp:
+                      resp.append( lid )
+                    #TODO- make it an option if we want gotos for
+                    #this completion
                     self._goto_labels[lid] = (filename, i+1, match.start(1))
 
             self._cached_data[filename] = resp
             ret.extend(resp)
-        return ret
+        """
+        we moved the building of completes to here so we can
+        share a cache between square and curly brackets
+        """
+        resp = []
+        for i in ret:
+           resp.extend(BuildOurCompletes(i)) 
+        return resp
 
 class BibTexSlave (GenericSlave):
-    def __init__(self)
+    def __init__(self):
         super( BibTexSlave , self).__init__(r"\\[a-zA-Z]*cite[a-zA-Z]*\*?")
         self.extensions = ".bib"
 
@@ -261,8 +270,13 @@ class LatexCompleter( Completer ):
 
     def __init__( self, user_options ):
         super( LatexCompleter, self ).__init__( user_options )
-        self._ref_reg           = re.compile(r"\\[a-zA-Z]*ref$")
-        self._env_reg           = re.compile(r"\\(begin|end)$")
+        self.environment_completer   = LatexSlave({'output':r"\\(begin|end)",
+            'collect': r"\\begin\{(.*?)\}"
+            'target': "Env"})
+        self.ref_completer           = LatexSlave({'output':r"\\[a-zA-Z]*ref",
+            'collect': r"\\\w*(?<!contents)label\{(.*?)\}",
+            'target': "Ref"})
+        self.bib_completer           = BibTexSlave()
         self.logfile            = open("/home/veesh/latexlog", "w")
         
 
@@ -319,40 +333,6 @@ class LatexCompleter( Completer ):
         Determines which vim filetypes we support
         """
         return ['plaintex', 'tex']
-
-
-
-
-        
-    def _FindEnvironments(self):
-        """
-        Find LaTeX environments for \begin{} completion.
-
-        This time we scan through all .tex files in the current
-        directory and extract the content of all \begin{} commands
-        as sources for completion.
-        """
-        ret = []
-        for filename in self._Walk(self._main_directory, ".tex"):
-            skip, cache = self._CacheDataAndSkip(filename)
-            if skip:
-                ret.extend(cache)
-                continue
-
-            resp = []
-            for i, line in enumerate(codecs.open(filename, 'r', 'utf-8')):
-                line = line.rstrip()
-                match = re.search(r".*\\begin{(.*?)}.*", line)
-                if match is not None:
-                    lid = re.sub(r".*\\begin{(.*?)}.*", r"\1", line)
-                    temp = self.BuildOurCompletes(lid, "Environment")
-                    if not temp in ret and not temp in resp:
-                      resp.append( temp )
-
-            self._cached_data[filename] = resp
-            ret.extend(resp)
-        return ret
-
 
     def _GoToDefinition(self, request_data):
         def find_end_of_command(line, match):
