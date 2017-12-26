@@ -73,8 +73,16 @@ class GenericSlave (object):
         self.extensions         = ''
         self.output_regex       = re.compile(output + "$", re.UNICODE)
 
-    def ShouldUse(self, target):
-        if self.output_regex.search(target) is not None:
+    def ShouldUse(self, target, request_data):
+        """
+        Returns true if it's meant to give a completion, and sets
+        our internal truth flag
+        """
+        if self._main_directory is None:
+            self._ComputeMainDirectory(request_data)
+
+        match = self.output_regex.search(target)
+        if  match is not None:
             self.completion_wanted = True
         else:
             self.completion_wanted = False
@@ -127,17 +135,26 @@ class GenericSlave (object):
         self._files[filename] = last_modification
         return False, []
 
-    def ProduceTargets(self):
+    def ProduceTargets(self, logfile):
+        """
+        Gives off the completion candidates for this completer
+        """
+
         if self.completion_wanted:
+            logfile.write("wanted now for " +
+                    self._completion_target + "\n")
             return self._FindTarget()
+        else:
+            return []
 
     def _FindTarget(self):
         pass
 
 class LatexSlave (GenericSlave):
+
     def __init__(self, arguments):
         super( LatexSlave , self).__init__(arguments['output'])
-        self.collect_regex = re.compile(arguments['collect'], re.UNICODE)
+        self.collect_regex = arguments['collect']
         self.extensions = ".latexmain"
         self._completion_target = arguments['target']
 
@@ -168,12 +185,11 @@ class LatexSlave (GenericSlave):
             resp = []
             for i, line in enumerate(codecs.open(filename, 'r', 'utf-8')):
                 line = line.rstrip()
-                match = re.search(r".*"+ self.collect_regex + ".*", line)
+                match = re.search(self.collect_regex, line)
                 if match is not None:
-                    lid = re.sub(r".*" + self.collect_regex + ".*", r"\1", line)
-                    temp = self.BuildOurCompletes(lid)
+                    lid = re.sub(".*" + self.collect_regex + ".*", r"\1", line)
                     if not lid in ret and not lid in resp:
-                      resp.append( lid )
+                        resp.append( lid )
                     #TODO- make it an option if we want gotos for
                     #this completion
                     self._goto_labels[lid] = (filename, i+1, match.start(1))
@@ -184,15 +200,17 @@ class LatexSlave (GenericSlave):
         we moved the building of completes to here so we can
         share a cache between square and curly brackets
         """
-        resp = []
+        temp = []
         for i in ret:
-           resp.extend(BuildOurCompletes(i)) 
-        return resp
+            tempo = self.BuildOurCompletes(i)
+            temp.append( tempo ) 
+        return temp
 
 class BibTexSlave (GenericSlave):
     def __init__(self):
         super( BibTexSlave , self).__init__(r"\\[a-zA-Z]*cite[a-zA-Z]*\*?")
         self.extensions = ".bib"
+        self._completion_target = 'Bib'
 
     def _FindBibEntriesRegex(self):
         """
@@ -270,61 +288,46 @@ class LatexCompleter( Completer ):
 
     def __init__( self, user_options ):
         super( LatexCompleter, self ).__init__( user_options )
-        self.environment_completer   = LatexSlave({'output':r"\\(begin|end)",
-            'collect': r"\\begin\{(.*?)\}"
+        self.environment_completer   = LatexSlave({'output' : r"\\(begin|end)",
+            'collect': r"\\begin\{(.*?)\}",
             'target': "Env"})
         self.ref_completer           = LatexSlave({'output':r"\\[a-zA-Z]*ref",
             'collect': r"\\\w*(?<!contents)label\{(.*?)\}",
             'target': "Ref"})
         self.bib_completer           = BibTexSlave()
+        self.completers              = [self.environment_completer, self.ref_completer,
+                self.bib_completer]
         self.logfile            = open("/home/veesh/latexlog", "w")
         
 
     def ShouldUseNowInner( self, request_data ):
 
-        cursor      = request_data["column_codepoint"]  - 1
-        match_start = request_data["start_codepoint"] - 1
+        cursor      = request_data["column_codepoint"] - 1 
+        match_start = request_data["start_codepoint"]  - 1
         line        = request_data["line_value"]
 
-        if self._main_directory is None:
-            self._ComputeMainDirectory(request_data)
 
         should_use = False
         line_splitted = line[ : match_start ]
         line_left     = line[ match_start : cursor ]
 
-        if  line[match_start] == '\\':
-            return should_use
+        if match_start:
+            if  line[match_start] == '\\':
+                return should_use
 
-        """
         self.logfile.write("line split: " + line_splitted + "\n")
         self.logfile.write("line  left: " + line_left + "\n")
         self.logfile.write("full  line: " + line + "\n")
         self.logfile.write("\n")
-        """
         
-
-        match = self._cite_reg.search(line_splitted)
-        if match is not None:
-            self._completion_target = 'cite'
-            should_use = True
-
-        match = self._ref_reg.search(line_splitted)
-        #TODO- consider that hyperref takes the label in  a [ ] pair
-        if match is not None :
-            if self._completion_target == 'cite':
-                self._completion_target = 'all'
+        for x in self.completers:
+            if not should_use:
+                should_use = x.ShouldUse(line_splitted, request_data)
             else:
-                self._completion_target = 'label'
-            should_use = True
-
-        match = self._env_reg.search(line_splitted)
-        if match is not None:
-            self._completion_target = 'environment'
-            should_use = True
+               x.ShouldUse(line_splitted, request_data)
 
 
-
+        self.logfile.flush()
         return should_use
 
 
@@ -371,10 +374,13 @@ class LatexCompleter( Completer ):
       self.DebugInfo(request_data))
 
     def DebugInfo( self, request_data ):
+        """
         bib_dir = "Looking for *.bib in %s" % self._main_directory
         cache   = "Number of cached files: %i" % len(self._files)
         hits    = "Number of cache hits: %i" % self._d_cache_hits
         return "%s\n%s\n%s" % (bib_dir, cache, hits)
+        """
+        pass
 
     def ComputeCandidatesInner( self, request_data ):
         """
@@ -383,17 +389,8 @@ class LatexCompleter( Completer ):
         """
         candidates = []
 
-        if self._main_directory is None:
-            self._ComputeMainDirectory(request_data)
-
-        if self._completion_target == 'cite':
-            candidates = self._FindBibEntries()
-        elif self._completion_target == 'label':
-            candidates = self._FindLabels()
-        elif self._completion_target == 'environment':
-            candidates = self._FindEnvironments()
-        elif self._completion_target == 'all':
-            candidates = self._FindLabels() + self._FindBibEntries()
+        for i in self.completers:
+            candidates.extend(i.ProduceTargets(self.logfile))
 
         print(request_data['query'], sys.stderr)
 
