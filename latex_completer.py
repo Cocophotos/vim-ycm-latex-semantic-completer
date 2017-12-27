@@ -9,12 +9,13 @@ import codecs
 from ycmd.completers.completer import Completer
 from ycmd import responses
 from ycmd import utils
+from ycmd import identifier_utils
 
-"""
-TODO- change approach, and use seperate objects for each
-completer engine. Right now, they share a cache, which is silly,
-to say the least.
-"""
+identifier_utils.FILETYPE_TO_IDENTIFIER_REGEX['tex'] = re.compile( r"(?:\\[@a-zA-Z]+)|(?:\{[_\w:-]*\}?)|(?:\[[_\w:-]*\]?)")
+
+def Update_RegEx( new ):
+    identifier_utils.FILETYPE_TO_IDENTIFIER_REGEX['tex'] = re.compile ( new , re.U )
+    return True
 
 # To handle BibTeX properly
 nobibparser = False
@@ -135,14 +136,12 @@ class GenericSlave (object):
         self._files[filename] = last_modification
         return False, []
 
-    def ProduceTargets(self, logfile):
+    def ProduceTargets(self):
         """
         Gives off the completion candidates for this completer
         """
 
         if self.completion_wanted:
-            logfile.write("wanted now for " +
-                    self._completion_target + "\n")
             return self._FindTarget()
         else:
             return []
@@ -297,7 +296,7 @@ class LatexCompleter( Completer ):
         self.bib_completer           = BibTexSlave()
         self.completers              = [self.environment_completer, self.ref_completer,
                 self.bib_completer]
-        self.logfile            = open("/home/veesh/latexlog", "w")
+        #self.logfile            = open("/home/veesh/latexlog", "w")
         
 
     def ShouldUseNowInner( self, request_data ):
@@ -315,10 +314,12 @@ class LatexCompleter( Completer ):
             if  line[match_start] == '\\':
                 return should_use
 
+        """
         self.logfile.write("line split: " + line_splitted + "\n")
         self.logfile.write("line  left: " + line_left + "\n")
         self.logfile.write("full  line: " + line + "\n")
         self.logfile.write("\n")
+        """
         
         for x in self.completers:
             if not should_use:
@@ -327,7 +328,7 @@ class LatexCompleter( Completer ):
                x.ShouldUse(line_splitted, request_data)
 
 
-        self.logfile.flush()
+        #self.logfile.flush()
         return should_use
 
 
@@ -390,7 +391,7 @@ class LatexCompleter( Completer ):
         candidates = []
 
         for i in self.completers:
-            candidates.extend(i.ProduceTargets(self.logfile))
+            candidates.extend(i.ProduceTargets())
 
         print(request_data['query'], sys.stderr)
 
