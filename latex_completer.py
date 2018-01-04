@@ -9,7 +9,13 @@ import codecs
 from ycmd.completers.completer import Completer
 from ycmd import responses
 from ycmd import utils
+from ycmd import identifier_utils
 
+identifier_utils.FILETYPE_TO_IDENTIFIER_REGEX['tex'] = re.compile( r"(?:\\[@a-zA-Z]+)|(?:\{[_\w:-]*\}?)|(?:\[[_\w:-]*\]?)")
+
+def Update_RegEx( new ):
+    identifier_utils.FILETYPE_TO_IDENTIFIER_REGEX['tex'] = re.compile ( new , re.U )
+    return True
 
 # To handle BibTeX properly
 nobibparser = False
@@ -52,54 +58,37 @@ def bib_customizations(record):
 
 LOG = logging.getLogger(__name__)
 
-class LatexCompleter( Completer ):
+class GenericSlave (object):
     """
-    Completer for LaTeX that takes into account BibTex entries
-    for completion.
+    A generic slave for completing. Contains its own conception of
+    the main directory, and its own responses cache
     """
-
-    def __init__( self, user_options ):
-        super( LatexCompleter, self ).__init__( user_options )
+    def __init__(self, output):
         self._completion_target = 'none'
         self._main_directory    = None
-        self._cite_reg          = re.compile("\\\\[a-zA-Z]*cite[a-zA-Z]*\*?\{[^\s\}]*\}?")
-        self._ref_reg           = re.compile("\\\\[a-zA-Z]*ref\{[^\s\}]*\}?")
+        self.completion_wanted  = False
         self._files             = {}
         self._cached_data       = {}
         self._d_cache_hits      = 0
         self._goto_labels       = {}
+        self.extensions         = ''
+        self.output_regex       = re.compile(output + "$", re.UNICODE)
 
-    def ShouldUseNowInner( self, request_data ):
-        #q    = utils.ToUtf8IfNeeded(request_data['query'])
-        #col  = request_data["start_column"]
-        line = utils.ToUnicode(request_data["line_value"])
-
+    def ShouldUse(self, target, request_data):
+        """
+        Returns true if it's meant to give a completion, and sets
+        our internal truth flag
+        """
         if self._main_directory is None:
             self._ComputeMainDirectory(request_data)
 
-        should_use = False
-        line_splitted = line
-        match = self._cite_reg.search(line_splitted)
-        if match is not None:
-            self._completion_target = 'cite'
-            should_use = True
+        match = self.output_regex.search(target)
+        if  match is not None:
+            self.completion_wanted = True
+        else:
+            self.completion_wanted = False
+        return self.completion_wanted
 
-        match = self._ref_reg.search(line_splitted)
-        if match is not None:
-            if self._completion_target == 'cite':
-                self._completion_target = 'all'
-            else:
-                self._completion_target = 'label'
-            should_use = True
-
-        return should_use
-
-
-    def SupportedFiletypes( self ):
-        """
-        Determines which vim filetypes we support
-        """
-        return ['plaintex', 'tex']
 
     def _Walk( self, path, what ):
         for root, dirs, files in os.walk(path):
@@ -107,7 +96,7 @@ class LatexCompleter( Completer ):
                 if file.endswith(what):
                     yield os.path.join(root, file)
 
-    def _ComputeMainDirectory( self, request_data ):
+    def _ComputeMainDirectory( self,  request_data ):
         def FindMain(path, what):
             found = False
             for file in os.listdir(path):
@@ -127,11 +116,12 @@ class LatexCompleter( Completer ):
         filepath = request_data['filepath']
         path     = os.path.dirname(filepath)
 
-        if not FindMain(path, ".bib"):
+        if not FindMain(path, self.extensions):
             self._main_directory = filepath
             print("Unable to set the main directory...", sys.stderr)
         else:
-            print("Main directory successfully found at {}".format(self._main_directory), sys.stderr)
+            print("Main directory successfully found at {}".format(self._main_directory), 
+                    sys.stderr)
 
     def _CacheDataAndSkip(self, filename):
         last_modification = os.path.getmtime(filename)
@@ -145,6 +135,81 @@ class LatexCompleter( Completer ):
 
         self._files[filename] = last_modification
         return False, []
+
+    def ProduceTargets(self):
+        """
+        Gives off the completion candidates for this completer
+        """
+
+        if self.completion_wanted:
+            return self._FindTarget()
+        else:
+            return []
+
+    def _FindTarget(self):
+        pass
+
+class LatexSlave (GenericSlave):
+
+    def __init__(self, arguments):
+        super( LatexSlave , self).__init__(arguments['output'])
+        self.collect_regex = arguments['collect']
+        self.extensions = ".latexmain"
+        self._completion_target = arguments['target']
+
+    def BuildOurCompletes(self, name):
+        """
+        Surround the response value with brackets.
+        TODO- perhaps add a square bracket option
+        """
+        return responses.BuildCompletionData("{" + name + "}",
+                self._completion_target, None, name)
+
+
+    def _FindTarget(self):
+        """
+        Find LaTeX labels for various completions
+
+        This time we scan through all .tex files in the current
+        directory and extract the content of all relevant commands
+        as sources for completion.
+        """
+        ret = []
+        for filename in self._Walk(self._main_directory, ".tex"):
+            skip, cache = self._CacheDataAndSkip(filename)
+            if skip:
+                ret.extend(cache)
+                continue
+
+            resp = []
+            for i, line in enumerate(codecs.open(filename, 'r', 'utf-8')):
+                line = line.rstrip()
+                match = re.search(self.collect_regex, line)
+                if match is not None:
+                    lid = re.sub(".*" + self.collect_regex + ".*", r"\1", line)
+                    if not lid in ret and not lid in resp:
+                        resp.append( lid )
+                    #TODO- make it an option if we want gotos for
+                    #this completion
+                    self._goto_labels[lid] = (filename, i+1, match.start(1))
+
+            self._cached_data[filename] = resp
+            ret.extend(resp)
+        """
+        we moved the building of completes to here so we can
+        share a cache between square and curly brackets
+        """
+        temp = []
+        for i in ret:
+            tempo = self.BuildOurCompletes(i)
+            temp.append( tempo ) 
+        return temp
+
+class BibTexSlave (GenericSlave):
+    def __init__(self):
+        super( BibTexSlave , self).__init__(r"\\[a-zA-Z]*cite[a-zA-Z]*\*?")
+        self.extensions = ".bib"
+        self._completion_target = 'Bib'
 
     def _FindBibEntriesRegex(self):
         """
@@ -199,7 +264,7 @@ class LatexCompleter( Completer ):
             self._cached_data[filename] = resp
         return ret
 
-    def _FindBibEntries(self):
+    def _FindTarget(self):
         """
         Find BIBtex entries.
 
@@ -214,22 +279,55 @@ class LatexCompleter( Completer ):
         else:
             return self._FindBibEntriesParser()
 
+class LatexCompleter( Completer ):
+    """
+    Completer for LaTeX that takes into account BibTex entries
+    for completion.
+    """
 
-    def _FindLabels(self):
+    def __init__( self, user_options ):
+        super( LatexCompleter, self ).__init__( user_options )
+        self.environment_completer   = LatexSlave({'output' : r"\\(begin|end)",
+            'collect': r"\\begin\{(.*?)\}",
+            'target': "Env"})
+        self.ref_completer           = LatexSlave({'output':r"\\[a-zA-Z]*ref",
+            'collect': r"\\\w*(?<!contents)label\{(.*?)\}",
+            'target': "Ref"})
+        self.bib_completer           = BibTexSlave()
+        self.completers              = [self.environment_completer, self.ref_completer,
+                self.bib_completer]
+        #self.logfile            = open("/home/veesh/latexlog", "w")
+        
+
+    def ShouldUseNowInner( self, request_data ):
+
+        cursor      = request_data["column_codepoint"] - 1 
+        match_start = request_data["start_codepoint"]  - 1
+        line        = request_data["line_value"]
+
+
+        should_use = False
+        line_splitted = line[ : match_start ]
+        line_left     = line[ match_start : cursor ]
+
+        if match_start:
+            if  line[match_start] == '\\':
+                return should_use
+
         """
-        Find LaTeX labels for \ref{} completion.
-
-        This time we scan through all .tex files in the current
-        directory and extract the content of all \label{} commands
-        as sources for completion.
+        self.logfile.write("line split: " + line_splitted + "\n")
+        self.logfile.write("line  left: " + line_left + "\n")
+        self.logfile.write("full  line: " + line + "\n")
+        self.logfile.write("\n")
         """
-        ret = []
-        for filename in self._Walk(self._main_directory, ".tex"):
-            skip, cache = self._CacheDataAndSkip(filename)
-            if skip:
-                ret.extend(cache)
-                continue
+        
+        for x in self.completers:
+            if not should_use:
+                should_use = x.ShouldUse(line_splitted, request_data)
+            else:
+               x.ShouldUse(line_splitted, request_data)
 
+<<<<<<< HEAD
             resp = []
             for i, line in enumerate(codecs.open(filename, 'r', 'utf-8')):
                 line = line.rstrip()
@@ -238,10 +336,18 @@ class LatexCompleter( Completer ):
                     lid = re.sub(r".*\\label{(.*)}.*", r"\1", line)
                     self._goto_labels[lid] = (filename, i+1, match.start(1))
                     resp.append( responses.BuildCompletionData(lid) )
+=======
+>>>>>>> 9897832fe29970f7a70619355382baf44a790c8d
 
-            self._cached_data[filename] = resp
-            ret.extend(resp)
-        return ret
+        #self.logfile.flush()
+        return should_use
+
+
+    def SupportedFiletypes( self ):
+        """
+        Determines which vim filetypes we support
+        """
+        return ['plaintex', 'tex']
 
     def _GoToDefinition(self, request_data):
         def find_end_of_command(line, match):
@@ -280,10 +386,13 @@ class LatexCompleter( Completer ):
       self.DebugInfo(request_data))
 
     def DebugInfo( self, request_data ):
+        """
         bib_dir = "Looking for *.bib in %s" % self._main_directory
         cache   = "Number of cached files: %i" % len(self._files)
         hits    = "Number of cache hits: %i" % self._d_cache_hits
         return "%s\n%s\n%s" % (bib_dir, cache, hits)
+        """
+        pass
 
     def ComputeCandidatesInner( self, request_data ):
         """
@@ -292,15 +401,8 @@ class LatexCompleter( Completer ):
         """
         candidates = []
 
-        if self._main_directory is None:
-            self._ComputeMainDirectory(request_data)
-
-        if self._completion_target == 'cite':
-            candidates = self._FindBibEntries()
-        elif self._completion_target == 'label':
-            candidates = self._FindLabels()
-        elif self._completion_target == 'all':
-            candidates = self._FindLabels() + self._FindBibEntries()
+        for i in self.completers:
+            candidates.extend(i.ProduceTargets())
 
         print(request_data['query'], sys.stderr)
 
