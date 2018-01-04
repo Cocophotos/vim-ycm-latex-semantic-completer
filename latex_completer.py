@@ -120,7 +120,7 @@ class GenericSlave (object):
             self._main_directory = filepath
             print("Unable to set the main directory...", sys.stderr)
         else:
-            print("Main directory successfully found at {}".format(self._main_directory), 
+            print("Main directory successfully found at {}".format(self._main_directory),
                     sys.stderr)
 
     def _CacheDataAndSkip(self, filename):
@@ -202,7 +202,7 @@ class LatexSlave (GenericSlave):
         temp = []
         for i in ret:
             tempo = self.BuildOurCompletes(i)
-            temp.append( tempo ) 
+            temp.append( tempo )
         return temp
 
 class BibTexSlave (GenericSlave):
@@ -297,11 +297,11 @@ class LatexCompleter( Completer ):
         self.completers              = [self.environment_completer, self.ref_completer,
                 self.bib_completer]
         #self.logfile            = open("/home/veesh/latexlog", "w")
-        
+
 
     def ShouldUseNowInner( self, request_data ):
 
-        cursor      = request_data["column_codepoint"] - 1 
+        cursor      = request_data["column_codepoint"] - 1
         match_start = request_data["start_codepoint"]  - 1
         line        = request_data["line_value"]
 
@@ -320,24 +320,13 @@ class LatexCompleter( Completer ):
         self.logfile.write("full  line: " + line + "\n")
         self.logfile.write("\n")
         """
-        
+
         for x in self.completers:
             if not should_use:
                 should_use = x.ShouldUse(line_splitted, request_data)
             else:
                x.ShouldUse(line_splitted, request_data)
 
-<<<<<<< HEAD
-            resp = []
-            for i, line in enumerate(codecs.open(filename, 'r', 'utf-8')):
-                line = line.rstrip()
-                match = re.search(r".*\\label{(.*)}.*", line)
-                if match is not None:
-                    lid = re.sub(r".*\\label{(.*)}.*", r"\1", line)
-                    self._goto_labels[lid] = (filename, i+1, match.start(1))
-                    resp.append( responses.BuildCompletionData(lid) )
-=======
->>>>>>> 9897832fe29970f7a70619355382baf44a790c8d
 
         #self.logfile.flush()
         return should_use
